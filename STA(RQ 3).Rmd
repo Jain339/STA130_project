@@ -1,0 +1,284 @@
+---
+title: "UNICEF Project Exploration - STA130 Winter 2024"
+author: "Nikita Jain"
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(tidyverse)
+```
+
+# Final Project Overview: Identifying Opportunities to Accelerate Progress on Sustainable Development Goals (SDG)
+
+## Guiding Research Question
+
+How do landlocked countries compare with small island nations in their advancement toward meeting the UN’s Sustainable Development Goals (SDGs)?
+
+## Specific Research Question
+
+Do countries show higher/lower gender inequality due to their geographic categorization as landlocked or small islands based on the mean Women Empowerment Index scores?
+
+## Data Wrangling and Cleaning
+
+```{r}
+# Feeding in file path
+file_path <- "/home/rstudio/STA130-W24/Final Project/country_indicators.csv"
+
+# load in country indicators with required variables
+country_indicators <- 
+  read_csv(file_path) %>%
+  select(
+    'iso3',
+    'hdr_pr_f_2021',
+    'sowc_maternal-and-newborn-health__demand-for-family-planning-satisfied-with-modern-methods-2016-2021-r_service-coverage-sub-index-on-reproductive-maternal-newborn-and-child-health',
+    'sowc_adolescent-health__adolescent-birth-rate-2016-2021-r_aged-15-19_female',
+    'sowc_women-s-economic-empowerment__educational-attainment-2008-2021-r_upper-secondary_female',
+    'sowc_adolescents__transition-to-work-2013-2021-r_not-in-education-employment-or-training_female',
+    'sowc_women-s-economic-empowerment__labour-force-participation-rate-2010-2020-r_female_total',
+    'sowc_women-s-economic-empowerment__financial-inclusion-2014-2020-r_female_female',
+    'sowc_adolescents__protection_intimate-partner-violence-2013-2020-r_female') %>% 
+  select(iso3, everything()) %>%  
+  rename(con_code = iso3) 
+
+# preview data
+country_indicators
+```
+
+sdg file
+
+```{r}
+# load SDG data and select necessary variable
+sdg <- 
+  read_csv("/home/rstudio/STA130-W24/Final Project/sdr_fd5e4b5a.csv") %>%
+  select('Country Code ISO3') %>% rename(con_code = 'Country Code ISO3')
+
+# preview data
+sdg
+```
+
+
+country_codes file
+
+```{r}
+# load country_codes data and select variables
+country_codes <- 
+  read_csv("/home/rstudio/STA130-W24/Final Project/country_codes.csv") %>%
+  select('ISO-alpha3 Code (M49)','Small Island Developing States (SIDS) (M49)', 
+         'Land Locked Developing Countries (LLDC) (M49)') %>% 
+  rename(con_code = 'ISO-alpha3 Code (M49)')
+
+country_codes
+```
+
+## Data Integration
+
+2- sample, 2-sided hypothesis testing
+
+Null Hypothesis- There is no difference in the mean Women Empowerment Index scores between Landlocked and Small Islands
+$H_0$: $g_1 = g_2$ and $g_1 - g_2 = 0$  
+
+Alternate Hypothesis- There is a difference in the mean Women Empowerment Index scores between Landlocked and Small Islands
+$H_1$: $g_1 != g_2$ and $g_1 - g_2 != 0$
+
+The set significance level (alpha level) would be set to $\alpha$ = 0.05. Null hypothesis would be rejected if p <= $\alpha$
+
+```{r}
+
+# Integrating data from all three data sets using con_code as a common key
+
+wei_rough_data <- inner_join(x=country_codes, y=country_indicators, by="con_code")
+wei_clean <- inner_join(x=wei_rough_data, y=sdg, by="con_code")
+
+# Renaming columns and removing extra variables
+
+wei_rename <- wei_clean %>% 
+  mutate(country_type = case_when(
+      `Small Island Developing States (SIDS) (M49)` == TRUE ~ "Small Island",
+      `Land Locked Developing Countries (LLDC) (M49)` == TRUE ~ "Land Locked",)) %>% 
+  rename(
+    MMC ='sowc_maternal-and-newborn-health__demand-for-family-planning-satisfied-with-modern-methods-2016-2021-r_service-coverage-sub-index-on-reproductive-maternal-newborn-and-child-health',
+    ABR = 'sowc_adolescent-health__adolescent-birth-rate-2016-2021-r_aged-15-19_female',
+    CSE = 'sowc_women-s-economic-empowerment__educational-attainment-2008-2021-r_upper-secondary_female',
+    NEET = 'sowc_adolescents__transition-to-work-2013-2021-r_not-in-education-employment-or-training_female',
+    LFPR = 'sowc_women-s-economic-empowerment__labour-force-participation-rate-2010-2020-r_female_total',
+    FI = 'sowc_women-s-economic-empowerment__financial-inclusion-2014-2020-r_female_female',
+    PR = hdr_pr_f_2021,
+    IVP = 'sowc_adolescents__protection_intimate-partner-violence-2013-2020-r_female') %>% 
+  select(con_code, country_type, everything(), -"Land Locked Developing Countries (LLDC) (M49)", 
+         -"Small Island Developing States (SIDS) (M49)") 
+
+# replacing missing values of FI and IVP with their mean scores
+wei_rename_fill <- wei_rename %>% mutate(
+    FI = if_else(is.na(FI), mean(FI, na.rm = TRUE), FI),
+    IVP = if_else(is.na(IVP), mean(IVP, na.rm = TRUE), IVP)) %>% drop_na()
+
+
+wei_rename_fill
+```
+
+# Creating Women Empowerment index-
+```{r}
+
+# Setting maximum and minimum values for each indicator taken from 
+# Technical Note: Twin Indices on Women’s Empowerment and Gender Equality
+
+min_MMC = 0
+min_ABR = 0
+min_CSE = 0
+min_NEET = 0
+min_LFPR = 0
+min_FI = 0
+min_PR = 0
+min_IVP = 0
+
+max_MMC = 100
+max_ABR = 200
+max_CSE = 100
+max_NEET = 85
+max_LFPR = 100
+max_FI = 100
+max_PR = 75
+max_IVP = 60
+
+# Normalizing each variable to help with comparison
+# All variables are positive indicators (higher values indicate better performance in 
+# that field) except ABR, NEET, IPV
+
+wei_data <- wei_rename_fill %>% 
+  mutate(
+    
+    # Normalizing positive indicators
+    norm_MMC  = (MMC - min_MMC)/(max_MMC - min_MMC),
+    norm_FI   = (FI - min_FI)/(max_FI - min_FI),
+    norm_PR   = (PR - min_PR)/(max_PR - min_PR),
+    norm_CSE  = (CSE - min_CSE)/(max_CSE - min_CSE),
+    norm_LFPR = (LFPR - min_LFPR)/(max_LFPR - min_LFPR),
+    
+    # Normalizing negative indicators
+    norm_ABR  = (max_ABR - ABR)/(max_ABR - min_ABR),
+    norm_NEET = (max_NEET - NEET)/(max_NEET - min_NEET),
+    norm_IVP  = (max_IVP - IVP)/(max_IVP - min_IVP))
+
+# Calculation of dimension indices
+wei_data <- wei_data %>% 
+  mutate(
+    I_health    = (norm_MMC + norm_ABR) / 2,
+    I_education = (norm_CSE + norm_NEET) / 2,
+    I_inclusion = (norm_LFPR + norm_FI) / 2,
+    I_decision  = norm_PR,
+    I_violence  = norm_IVP)
+  
+
+# Computing Women Empowerment Index (WEI is a positive index)
+wei <- wei_data %>% select(-MMC, -ABR, -CSE, -NEET, -LFPR, -FI, -PR,-IVP) %>%
+  mutate(WEI = (I_health * I_education * I_inclusion * I_decision * I_violence) ^ (1/5))
+
+wei
+
+```
+
+# Calculating the observed test statistic- 
+$\Delta\hat{g}$ will be the difference in the mean scores of WEI of landlocked and small island countries
+
+```{r}
+ghat <- wei %>% 
+  group_by(country_type) %>%
+  summarise(means = mean(WEI)) 
+ghat
+
+delta_ghat <- 
+  wei %>% 
+  group_by(country_type) %>%
+  summarise(means = mean(WEI)) %>%
+  summarise(value = diff(means)) %>%
+  as.numeric()
+
+print(delta_ghat)
+```
+
+\newpage
+Below is R code that simulates $N = 1000$ values of the test statistic $\Delta\hat{g}_{\rm sim}$ **under the null hypothesis** using a permutation test. In this test, we assume that our groups are identical under our null hypothesis. Mixing the two groups together, randomly generating new groups with the same sizes, and then recomputing our test statistic each time therefore should allow us to simulate values from the sampling distribution provided our sample size is large enough.
+
+```{r}
+seed_num <- 130
+set.seed(seed_num)  # creating seed
+
+# setup
+n_trials <- 1000  # number of permutations
+
+# simulating test statistic (difference between mean scores of WEI)
+delta_ghat_simulations <- rep(NA, n_trials)
+
+for(i in 1:n_trials){
+  # perform a random permutation
+  simdata <- 
+    wei %>%
+    mutate(country_type = sample(country_type, replace=FALSE))
+  
+  # compute the simulated test statistic
+  delta_ghat_sim <- 
+    simdata %>% 
+    group_by(country_type) %>%
+    summarise(means = mean(WEI), .groups="drop") %>%
+    summarise(value = diff(means)) %>%
+    as.numeric()
+  
+  # store the simulated value
+  delta_ghat_simulations[i] <- delta_ghat_sim
+}
+
+```
+
+# Visualizations-
+
+```{r}
+# Visualizing sampling distribution of simulated test statistics using histograms
+
+ggplot() +
+  geom_histogram(aes(x=delta_ghat_simulations), color = "purple", fill = "purple", 
+                 position = "Identity", alpha = 0.7, bins= 20) +
+  labs(x = "Difference in Women Empowerment Index scores (delta_ghat_simulations)", 
+       y = "Frequency",
+       title = "Differences in 2-Sample Means for Gender Disparity Measurements") +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+# Creating box plots to compare the median WEI scores
+
+ggplot(data = wei, aes(x = country_type, y = WEI, fill = country_type)) +
+  geom_boxplot() +
+  labs(x = "Country Type", y = "Women Empowerment Index Scores", 
+       title = "Comparison of Women Empowerment Index Scores by Country Type") +
+  scale_fill_manual(values = c("orange", "purple")) +  
+  theme_minimal() +
+  theme(legend.position = "top")
+
+```
+
+
+# Computing the p-value- 
+(the probability of observing a test statistic at least as extreme as the observed value if the null hypothesis is true)
+```{r}
+# null hypothesis value
+delta_median_null <- 0
+
+p_value <-sum(abs(delta_ghat_simulations - delta_median_null) >= 
+                abs(delta_ghat - delta_median_null)) / n_trials
+print(p_value)
+
+```
+
+# Citations (MLA 9th edition)
+
+1. Jain-Chandra, Sonali. “Chapter 2. Gender Inequality around the World.” Www.elibrary.imf.org, International Monetary Fund, 
+www.elibrary.imf.org/display/book/9781513516103/ch002.xml#:~:text=The%20gender
+%20gap%20varies%20strongly.  
+
+2. TOWARDS IMPROVED MEASURES of GENDER INEQUALITY: An Evaluation of the UNDP Gender Inequality Index and a Proposal. 
+www.unwomen.org/sites/default/files/2022-11/Discussion-paper-Towards-improved-measures-of-gender-inequality-en.pdf.   
+
+3. Technical Note: Twin Indices on Women’s Empowerment and Gender Equality.
+hdr.undp.org/sites/default/files/
+publications/additional-files/2023-07/paths_equal_2023_tn.pdf.  
